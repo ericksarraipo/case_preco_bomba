@@ -1,4 +1,4 @@
-# Case Preco de Bomba - Distribuidora Veredas
+# Case Preço de Bomba - Distribuidora Veredas
 
 Pipeline analitico idempotente em arquitetura Medallion (Bronze / raw -> Prata -> Ouro) em Python (pandas + pyarrow), sem dependencia de Java/JVM no Windows, para apoiar a revisao da politica de reembolso de combustivel de ~2.400 vendedores externos no periodo de janeiro de 2024 a outubro de 2026 (34 meses).
 
@@ -12,7 +12,7 @@ No PowerShell, na raiz do projeto:
 # Opcional: rodar sem abrir o navegador ao final
 .\run_pipeline.ps1 -NoBrowser
 ```
-## Perguntas e Respostas - Case Preco de Bomba
+## Perguntas e Respostas - Case Pre?o de Bomba
 
 ### 1. A nossa tabela de tetos esta alinhada com o preco de bomba? Em quais UFs e em quais meses o teto ficou acima ou abaixo do preco praticado, e quanto, em R$ por litro?
 - **Criterio de comparacao:** A comparacao principal e **teto x gasolina comum** (base de definicao do teto), usando o **teto vigente na data do abastecimento** (data_coleta). Mudancas no meio do mes dividem o periodo pela data de troca (antes segue a versao anterior; a partir da troca, a nova).
