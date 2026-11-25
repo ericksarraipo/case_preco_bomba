@@ -2,253 +2,162 @@
 JOB: transform_silver_reembolso_uf_vigencia
 CAMADA: Prata (Silver)
 LE:
-  - data/raw/tabela_reembolso_uf.csv (tabela de tetos de reembolso por UF e vigencia)
+  - data/bronze ou data/raw (tabela_reembolso_uf)
 GRAVA:
-  - data/silver/silver_reembolso_uf_vigencia (Parquet particionado por coluna `uf`)
-GRAO:
-  - 1 linha por versao/registro de vigencia de teto por UF (`uf`, `versao`, `vigencia_inicio`)
-REGRAS APLICADAS:
-  1. Le o CSV separado por `;` com datas `dd/MM/yyyy` e decimais com virgula (`teto_litro_reembolso`).
-  2. Preserva `vigencia_fim_original_nula` e preenche `vigencia_fim` nula com `LIMITE_VIGENCIA_PADRAO` (`2026-10-31`) para analise de intervalos no recorte do case, sem imputar valores de teto.
-  3. Ordena por `uf`, `vigencia_inicio`, `versao` e identifica `LACUNA_ANTERIOR` e `SOBREPOSICAO_ANTERIOR` (como nos casos de BA e PR), registrando `flag_anomalia_vigencia` e `detalhe_anomalia` sem estimativas manuais.
-  4. Deduplica pela chave do grao (`uf`, `versao`, `vigencia_inicio`) e grava de forma idempotente por particao `uf`.
+  - data/silver/silver_reembolso_uf_vigencia (particionado por `uf`)
 """
 
 from datetime import datetime, timezone
-import os
 from pathlib import Path
 import shutil
-import sys
 
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    BooleanType,
-    DateType,
-    DecimalType,
-    IntegerType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-)
-from pyspark.sql.window import Window
-
-# ==============================================================================
-# PARAMETROS DO JOB (CENTRALIZADOS NO TOPO)
-# ==============================================================================
-LIMITE_VIGENCIA_PADRAO = "2026-10-31"
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INPUT_CSV_PATH = PROJECT_ROOT / "data" / "raw" / "tabela_reembolso_uf.csv"
-OUTPUT_SILVER_DIR = PROJECT_ROOT / "data" / "silver" / "silver_reembolso_uf_vigencia"
-
-SILVER_SCHEMA = StructType(
-    [
-        StructField("uf", StringType(), nullable=False),
-        StructField("versao", IntegerType(), nullable=False),
-        StructField("teto_litro_reembolso", DecimalType(10, 4), nullable=False),
-        StructField("vigencia_inicio", DateType(), nullable=False),
-        StructField("vigencia_fim", DateType(), nullable=False),
-        StructField("vigencia_fim_original_nula", BooleanType(), nullable=False),
-        StructField("flag_anomalia_vigencia", StringType(), nullable=False),
-        StructField("detalhe_anomalia", StringType(), nullable=True),
-        StructField("data_ingestao_utc", TimestampType(), nullable=False),
-    ]
-)
+BRONZE_DIR = PROJECT_ROOT / "data" / "bronze"
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
+SILVER_REEMBOLSO_DIR = PROJECT_ROOT / "data" / "silver" / "silver_reembolso_uf_vigencia"
 
 
-def _build_spark_session() -> SparkSession:
-    python_exe = sys.executable
-    os.environ["PYSPARK_PYTHON"] = python_exe
-    os.environ["PYSPARK_DRIVER_PYTHON"] = python_exe
-    return (
-        SparkSession.builder.appName("DistribuidoraVeredas_Silver_Reembolso_UF_Vigencia")
-        .config("spark.sql.session.timeZone", "UTC")
-        .config("spark.pyspark.python", python_exe)
-        .config("spark.pyspark.driver.python", python_exe)
-        .getOrCreate()
+def _find_reembolso_files() -> list[Path]:
+    roots = [d for d in [BRONZE_DIR, RAW_DIR] if d.exists()]
+    candidates: list[Path] = []
+    for root in roots:
+        for p in sorted(root.rglob("*")):
+            if not p.is_file() or p.suffix.lower() not in {".parquet", ".csv", ".json"}:
+                continue
+            if "reembolso" in p.name.lower() or "reembolso" in str(p.parent).lower():
+                candidates.append(p)
+    if not candidates:
+        raise FileNotFoundError(
+            f"Nenhum arquivo de reembolso encontrado em {BRONZE_DIR} ou {RAW_DIR}."
+        )
+    return candidates
+
+
+def _load_reembolso_df(files: list[Path]) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for path in files:
+        if path.suffix.lower() == ".parquet":
+            df = pd.read_parquet(path)
+        elif path.suffix.lower() == ".csv":
+            df = pd.read_csv(path, sep=None, engine="python")
+        else:
+            df = pd.read_json(path)
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _normalize_reembolso(raw_df: pd.DataFrame) -> pd.DataFrame:
+    df = raw_df.copy()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    uf_col = next((c for c in ["uf", "sigla_uf", "estado"] if c in df.columns), None)
+    teto_col = next(
+        (c for c in ["teto_litro_reembolso", "valor_teto", "teto_reembolso", "teto", "valor"] if c in df.columns),
+        None,
+    )
+    ini_col = next(
+        (c for c in ["vigencia_inicio", "data_inicio", "inicio_vigencia", "dt_inicio"] if c in df.columns),
+        None,
+    )
+    fim_col = next(
+        (c for c in ["vigencia_fim", "data_fim", "fim_vigencia", "dt_fim"] if c in df.columns),
+        None,
     )
 
+    if not uf_col or not teto_col or not ini_col:
+        raise ValueError(
+            f"Colunas esperadas nao encontradas no reembolso. Disponiveis: {df.columns.tolist()}"
+        )
 
-def _write_partitioned_parquet_idempotent(df_spark, output_dir: Path) -> None:
-    """
-    Grava o DataFrame particionado por `uf` de forma idempotente no Windows.
-    Remove apenas as pastas de particao (`uf=XX`) presentes no lote antes de gravar.
-    """
-    pdf = df_spark.toPandas()
+    df["uf"] = df[uf_col].astype(str).str.strip().str.upper()
+    df = df[df["uf"].str.len() == 2].copy()
+
+    teto_str = (
+        df[teto_col]
+        .astype(str)
+        .str.strip()
+        .str.replace("R$", "", regex=False)
+        .str.replace(",", ".", regex=False)
+    )
+    df["teto_litro_reembolso"] = pd.to_numeric(teto_str, errors="coerce")
+
+    ini_dt = pd.to_datetime(df[ini_col], errors="coerce")
+    df["vigencia_inicio"] = ini_dt.dt.strftime("%Y-%m-%d")
+
+    if fim_col:
+        fim_raw = df[fim_col]
+        fim_empty = fim_raw.isna() | fim_raw.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none", "null"})
+        fim_dt = pd.to_datetime(fim_raw, errors="coerce")
+        df["vigencia_fim_original_nula"] = (fim_empty | fim_dt.isna()).astype(bool)
+        df["vigencia_fim"] = fim_dt.dt.strftime("%Y-%m-%d")
+    else:
+        df["vigencia_fim_original_nula"] = True
+        df["vigencia_fim"] = pd.NA
+
+    if "versao" in df.columns:
+        df["versao"] = pd.to_numeric(df["versao"], errors="coerce").fillna(1).astype(int)
+    else:
+        df["versao"] = 1
+
+    # Deteccao de anomalias sem imputacao de valores
+    anom_parts: list[list[str]] = []
+    for _, row in df.iterrows():
+        motivos: list[str] = []
+        if pd.isna(row["teto_litro_reembolso"]) or row["teto_litro_reembolso"] <= 0:
+            motivos.append("teto_invalido_ou_nao_positivo")
+        if bool(row["vigencia_fim_original_nula"]):
+            motivos.append("vigencia_fim_nula")
+        if pd.notna(row["vigencia_inicio"]) and pd.notna(row["vigencia_fim"]):
+            if str(row["vigencia_fim"]) < str(row["vigencia_inicio"]):
+                motivos.append("vigencia_fim_anterior_ao_inicio")
+        anom_parts.append(motivos)
+
+    df["detalhe_anomalia"] = ["; ".join(m) if m else None for m in anom_parts]
+    df["flag_anomalia_vigencia"] = df["detalhe_anomalia"].notna().astype(bool)
+    df["data_ingestao_utc"] = datetime.now(timezone.utc)
+
+    cols = [
+        "uf",
+        "versao",
+        "teto_litro_reembolso",
+        "vigencia_inicio",
+        "vigencia_fim",
+        "vigencia_fim_original_nula",
+        "flag_anomalia_vigencia",
+        "detalhe_anomalia",
+        "data_ingestao_utc",
+    ]
+    return df[cols].dropna(subset=["uf", "vigencia_inicio"]).reset_index(drop=True)
+
+
+def _write_idempotent_by_uf(df: pd.DataFrame, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    parts_written = 0
+    total_rows = 0
 
-    if pdf.empty:
-        return
-
-    partitions_in_batch = sorted(pdf["uf"].dropna().unique().tolist())
-    for uf_val in partitions_in_batch:
-        part_path = output_dir / f"uf={str(uf_val).strip()}"
+    for uf_val, group_df in df.groupby("uf", sort=True):
+        uf_clean = str(uf_val).strip().upper()
+        part_path = output_dir / f"uf={uf_clean}"
         if part_path.exists():
             shutil.rmtree(part_path)
-
-    for uf_val, group_df in pdf.groupby("uf", sort=True):
-        uf_clean = str(uf_val).strip()
-        part_path = output_dir / f"uf={uf_clean}"
         part_path.mkdir(parents=True, exist_ok=True)
-        # Mantem `uf` dentro do arquivo parquet para facilitar leitura direta por particao/schema,
-        # ou remova se preferir hive-only; aqui mantemos todas as colunas do DDL.
-        data_df = group_df.drop(columns=["uf"]).reset_index(drop=True)
-        data_df.to_parquet(part_path / "part-00000.parquet", index=False)
+
+        out_df = group_df.drop(columns=["uf"]).reset_index(drop=True)
+        out_df.to_parquet(part_path / "part-00000.parquet", index=False)
+        parts_written += 1
+        total_rows += len(out_df)
+
+    print(f"  [SILVER REEMBOLSO] particoes(uf)={parts_written} | linhas={total_rows}")
 
 
 def run_job() -> None:
-    if not INPUT_CSV_PATH.exists():
-        raise FileNotFoundError(f"Arquivo de entrada nao encontrado: {INPUT_CSV_PATH}")
-
-    spark = _build_spark_session()
-    try:
-        ingest_ts = datetime.now(timezone.utc)
-
-        raw_df = (
-            spark.read.option("header", "true")
-            .option("sep", ";")
-            .option("encoding", "UTF-8")
-            .csv(str(INPUT_CSV_PATH))
-        )
-
-        limite_date = F.to_date(F.lit(LIMITE_VIGENCIA_PADRAO), "yyyy-MM-dd")
-
-        parsed_df = (
-            raw_df.withColumn("uf_limpa", F.upper(F.trim(F.col("uf"))))
-            .withColumn("versao_int", F.trim(F.col("versao")).cast(IntegerType()))
-            .withColumn(
-                "teto_dec",
-                F.regexp_replace(F.trim(F.col("teto_litro_reembolso")), ",", ".").cast(
-                    DecimalType(10, 4)
-                ),
-            )
-            .withColumn("vig_ini", F.to_date(F.trim(F.col("vigencia_inicio")), "dd/MM/yyyy"))
-            .withColumn("vig_fim_raw", F.to_date(F.trim(F.col("vigencia_fim")), "dd/MM/yyyy"))
-            .withColumn("vig_fim_nula", F.col("vig_fim_raw").isNull())
-            .withColumn("vig_fim", F.coalesce(F.col("vig_fim_raw"), limite_date))
-            .withColumn("obs_limpa", F.trim(F.col("observacao")))
-            .filter(
-                F.col("uf_limpa").isNotNull()
-                & (F.length(F.col("uf_limpa")) == 2)
-                & F.col("versao_int").isNotNull()
-                & F.col("teto_dec").isNotNull()
-                & F.col("vig_ini").isNotNull()
-                & F.col("vig_fim").isNotNull()
-            )
-        )
-
-        # Deduplicacao pela chave do grao (`uf_limpa`, `versao_int`, `vig_ini`)
-        dedup_window = Window.partitionBy("uf_limpa", "versao_int", "vig_ini").orderBy(
-            F.col("vig_fim").desc(), F.col("obs_limpa").desc_nulls_last()
-        )
-        dedup_df = (
-            parsed_df.withColumn("_rn", F.row_number().over(dedup_window))
-            .filter(F.col("_rn") == 1)
-            .drop("_rn")
-        )
-
-        # Janela temporal por UF para deteccao de lacunas e sobreposicoes
-        seq_window = Window.partitionBy("uf_limpa").orderBy(
-            F.col("vig_ini").asc(), F.col("versao_int").asc()
-        )
-
-        with_prev_df = (
-            dedup_df.withColumn("prev_vig_fim", F.lag("vig_fim").over(seq_window))
-            .withColumn("prev_versao", F.lag("versao_int").over(seq_window))
-            .withColumn(
-                "is_lacuna",
-                F.col("prev_vig_fim").isNotNull()
-                & (F.col("vig_ini") > F.date_add(F.col("prev_vig_fim"), 1)),
-            )
-            .withColumn(
-                "is_sobreposicao",
-                F.col("prev_vig_fim").isNotNull()
-                & (F.col("vig_ini") <= F.col("prev_vig_fim")),
-            )
-        )
-
-        flagged_df = (
-            with_prev_df.withColumn(
-                "flag_anomalia_vigencia",
-                F.when(F.col("is_lacuna"), F.lit("LACUNA_ANTERIOR"))
-                .when(F.col("is_sobreposicao"), F.lit("SOBREPOSICAO_ANTERIOR"))
-                .otherwise(F.lit("SEM_ANOMALIA")),
-            )
-            .withColumn(
-                "detalhe_anomalia",
-                F.when(
-                    F.col("is_lacuna"),
-                    F.concat(
-                        F.lit("Lacuna entre "),
-                        F.date_format(F.date_add(F.col("prev_vig_fim"), 1), "yyyy-MM-dd"),
-                        F.lit(" e "),
-                        F.date_format(F.date_sub(F.col("vig_ini"), 1), "yyyy-MM-dd"),
-                        F.lit(" (apos versao "),
-                        F.col("prev_versao").cast(StringType()),
-                        F.lit(")"),
-                        F.when(
-                            F.col("obs_limpa").isNotNull() & (F.length(F.col("obs_limpa")) > 0),
-                            F.concat(F.lit(" | obs: "), F.col("obs_limpa")),
-                        ).otherwise(F.lit("")),
-                    ),
-                )
-                .when(
-                    F.col("is_sobreposicao"),
-                    F.concat(
-                        F.lit("Sobreposicao a partir de "),
-                        F.date_format(F.col("vig_ini"), "yyyy-MM-dd"),
-                        F.lit(" com vigencia anterior ate "),
-                        F.date_format(F.col("prev_vig_fim"), "yyyy-MM-dd"),
-                        F.lit(" (versao anterior: "),
-                        F.col("prev_versao").cast(StringType()),
-                        F.lit(")"),
-                        F.when(
-                            F.col("obs_limpa").isNotNull() & (F.length(F.col("obs_limpa")) > 0),
-                            F.concat(F.lit(" | obs: "), F.col("obs_limpa")),
-                        ).otherwise(F.lit("")),
-                    ),
-                )
-                .otherwise(
-                    F.when(
-                        F.col("obs_limpa").isNotNull() & (F.length(F.col("obs_limpa")) > 0),
-                        F.concat(F.lit("obs: "), F.col("obs_limpa")),
-                    ).otherwise(F.lit(None).cast(StringType()))
-                ),
-            )
-        )
-
-        typed_df = (
-            flagged_df.withColumn("data_ingestao_utc", F.lit(ingest_ts).cast(TimestampType()))
-            .select(
-                F.col("uf_limpa").cast(StringType()).alias("uf"),
-                F.col("versao_int").cast(IntegerType()).alias("versao"),
-                F.col("teto_dec").cast(DecimalType(10, 4)).alias("teto_litro_reembolso"),
-                F.col("vig_ini").cast(DateType()).alias("vigencia_inicio"),
-                F.col("vig_fim").cast(DateType()).alias("vigencia_fim"),
-                F.col("vig_fim_nula").cast(BooleanType()).alias("vigencia_fim_original_nula"),
-                F.col("flag_anomalia_vigencia").cast(StringType()),
-                F.col("detalhe_anomalia").cast(StringType()),
-                F.col("data_ingestao_utc"),
-            )
-        )
-
-        expected_cols = [field.name for field in SILVER_SCHEMA.fields]
-        missing_cols = [c for c in expected_cols if c not in typed_df.columns]
-        if missing_cols:
-            raise ValueError(f"Colunas ausentes em relacao ao DDL: {missing_cols}")
-
-        row_count = typed_df.count()
-        _write_partitioned_parquet_idempotent(typed_df, OUTPUT_SILVER_DIR)
-
-        anom_count = typed_df.filter(F.col("flag_anomalia_vigencia") != "SEM_ANOMALIA").count()
-        print(
-            f"[OK] silver_reembolso_uf_vigencia gravado em {OUTPUT_SILVER_DIR} | "
-            f"linhas={row_count} | anomalias_vigencia={anom_count}"
-        )
-    finally:
-        spark.stop()
+    files = _find_reembolso_files()
+    raw_df = _load_reembolso_df(files)
+    silver_df = _normalize_reembolso(raw_df)
+    _write_idempotent_by_uf(silver_df, SILVER_REEMBOLSO_DIR)
+    print("[OK] Silver Reembolso concluido com sucesso (pandas + pyarrow).")
 
 
 if __name__ == "__main__":

@@ -2,207 +2,158 @@
 JOB: transform_silver_municipios_ibge
 CAMADA: Prata (Silver)
 LE:
-  - data/raw/ibge_municipios.json (cadastro oficial de municipios - API IBGE)
+  - data/bronze ou data/raw (ibge_municipios.json)
 GRAVA:
-  - data/silver/silver_municipios_ibge (Parquet particionado por coluna `uf`)
-GRAO:
-  - 1 linha por municipio (`codigo_ibge` unico)
-REGRAS APLICADAS:
-  1. Extrai campos de municipio, microrregiao, mesorregiao, UF e regiao a partir do JSON do IBGE.
-  2. Normaliza tipos conforme o DDL (`codigo_ibge`, `codigo_uf`, `codigo_regiao` como INT; textos e `uf` como STRING).
-  3. Filtra registros com `codigo_ibge` e `sigla_uf` validos e deduplica por `codigo_ibge` para garantir idempotencia.
-  4. Grava de forma idempotente por particao `uf` (`uf=XX`) sem duplicar em reexecucoes.
+  - data/silver/silver_municipios_ibge (particionado por `uf`)
 """
 
 from datetime import datetime, timezone
-import os
+import json
 from pathlib import Path
 import shutil
-import sys
+from typing import Any
 
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    IntegerType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-)
-from pyspark.sql.window import Window
+import pandas as pd
 
-# ==============================================================================
-# PARAMETROS DO JOB (CENTRALIZADOS NO TOPO)
-# ==============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INPUT_JSON_PATH = PROJECT_ROOT / "data" / "raw" / "ibge_municipios.json"
-OUTPUT_SILVER_DIR = PROJECT_ROOT / "data" / "silver" / "silver_municipios_ibge"
+BRONZE_DIR = PROJECT_ROOT / "data" / "bronze"
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
+SILVER_IBGE_DIR = PROJECT_ROOT / "data" / "silver" / "silver_municipios_ibge"
 
-SILVER_SCHEMA = StructType(
-    [
-        StructField("codigo_ibge", IntegerType(), nullable=False),
-        StructField("nome_municipio", StringType(), nullable=False),
-        StructField("codigo_uf", IntegerType(), nullable=False),
-        StructField("sigla_uf", StringType(), nullable=False),
-        StructField("nome_uf", StringType(), nullable=False),
-        StructField("codigo_regiao", IntegerType(), nullable=False),
-        StructField("sigla_regiao", StringType(), nullable=False),
-        StructField("nome_regiao", StringType(), nullable=False),
-        StructField("mesorregiao", StringType(), nullable=True),
-        StructField("microrregiao", StringType(), nullable=True),
-        StructField("data_ingestao_utc", TimestampType(), nullable=False),
-        StructField("uf", StringType(), nullable=False),
+
+def _find_ibge_files() -> list[Path]:
+    roots = [d for d in [BRONZE_DIR, RAW_DIR] if d.exists()]
+    candidates: list[Path] = []
+    for root in roots:
+        for p in sorted(root.rglob("*")):
+            if not p.is_file() or p.suffix.lower() not in {".json", ".csv", ".parquet"}:
+                continue
+            name_l = p.name.lower()
+            if "metadata" in name_l:
+                continue
+            if "ibge" in name_l or "municipio" in name_l:
+                candidates.append(p)
+    if not candidates:
+        raise FileNotFoundError(
+            f"Nenhum arquivo de municipios IBGE encontrado em {BRONZE_DIR} ou {RAW_DIR}."
+        )
+    return candidates
+
+
+def _flatten_ibge_records(payload: Any) -> list[dict[str, Any]]:
+    items = payload if isinstance(payload, list) else payload.get("dados", payload.get("municipios", []))
+    rows: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        microrregiao = item.get("microrregiao") or {}
+        mesorregiao = microrregiao.get("mesorregiao") or {}
+        uf_obj = mesorregiao.get("UF") or item.get("UF") or item.get("uf") or {}
+        regiao_obj = uf_obj.get("regiao") or item.get("regiao") or {}
+
+        codigo = item.get("id") or item.get("codigo_ibge") or item.get("codigo_municipio")
+        nome_mun = item.get("nome") or item.get("nome_municipio")
+        sigla_uf = (
+            uf_obj.get("sigla")
+            if isinstance(uf_obj, dict)
+            else (uf_obj or item.get("sigla_uf") or item.get("uf"))
+        )
+        nome_uf = uf_obj.get("nome") if isinstance(uf_obj, dict) else item.get("nome_uf")
+        sigla_reg = (
+            regiao_obj.get("sigla")
+            if isinstance(regiao_obj, dict)
+            else item.get("sigla_regiao")
+        )
+        nome_reg = (
+            regiao_obj.get("nome")
+            if isinstance(regiao_obj, dict)
+            else item.get("nome_regiao")
+        )
+
+        rows.append(
+            {
+                "codigo_ibge": codigo,
+                "nome_municipio": nome_mun,
+                "sigla_uf": sigla_uf,
+                "nome_uf": nome_uf,
+                "sigla_regiao": sigla_reg,
+                "nome_regiao": nome_reg,
+            }
+        )
+    return rows
+
+
+def _load_ibge_df(files: list[Path]) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for path in files:
+        if path.suffix.lower() == ".json":
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            df = pd.DataFrame(_flatten_ibge_records(payload))
+        elif path.suffix.lower() == ".csv":
+            df = pd.read_csv(path, sep=None, engine="python")
+        else:
+            df = pd.read_parquet(path)
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _normalize_ibge(raw_df: pd.DataFrame) -> pd.DataFrame:
+    df = raw_df.copy()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    df["codigo_ibge"] = pd.to_numeric(df["codigo_ibge"], errors="coerce").astype("Int64")
+    df["nome_municipio"] = df["nome_municipio"].astype(str).str.strip()
+    df["sigla_uf"] = df["sigla_uf"].astype(str).str.strip().str.upper()
+    df["nome_uf"] = df["nome_uf"].astype(str).str.strip()
+    df["sigla_regiao"] = df["sigla_regiao"].astype(str).str.strip().str.upper()
+    df["nome_regiao"] = df["nome_regiao"].astype(str).str.strip()
+    df["uf"] = df["sigla_uf"]
+
+    df = df.dropna(subset=["codigo_ibge", "uf"]).copy()
+    df = df[df["uf"].str.len() == 2]
+    df = df.drop_duplicates(subset=["codigo_ibge"]).reset_index(drop=True)
+    df["data_ingestao_utc"] = datetime.now(timezone.utc)
+
+    cols = [
+        "codigo_ibge",
+        "nome_municipio",
+        "sigla_uf",
+        "nome_uf",
+        "sigla_regiao",
+        "nome_regiao",
+        "uf",
+        "data_ingestao_utc",
     ]
-)
+    return df[cols]
 
 
-def _build_spark_session() -> SparkSession:
-    python_exe = sys.executable
-    os.environ["PYSPARK_PYTHON"] = python_exe
-    os.environ["PYSPARK_DRIVER_PYTHON"] = python_exe
-    return (
-        SparkSession.builder.appName("DistribuidoraVeredas_Silver_Municipios_IBGE")
-        .config("spark.sql.session.timeZone", "UTC")
-        .config("spark.pyspark.python", python_exe)
-        .config("spark.pyspark.driver.python", python_exe)
-        .getOrCreate()
-    )
-
-
-def _write_partitioned_parquet_idempotent(df_spark, output_dir: Path) -> None:
-    """
-    Grava o DataFrame particionado por `uf` de forma idempotente no Windows.
-    Remove apenas as pastas de particao (`uf=XX`) presentes no lote antes de gravar.
-    """
-    pdf = df_spark.toPandas()
+def _write_idempotent_by_uf(df: pd.DataFrame, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    parts_written = 0
+    total_rows = 0
 
-    if pdf.empty:
-        return
-
-    partitions_in_batch = sorted(pdf["uf"].dropna().unique().tolist())
-    for uf_val in partitions_in_batch:
-        part_path = output_dir / f"uf={str(uf_val).strip()}"
+    for uf_val, group_df in df.groupby("uf", sort=True):
+        uf_clean = str(uf_val).strip().upper()
+        part_path = output_dir / f"uf={uf_clean}"
         if part_path.exists():
             shutil.rmtree(part_path)
-
-    for uf_val, group_df in pdf.groupby("uf", sort=True):
-        uf_clean = str(uf_val).strip()
-        part_path = output_dir / f"uf={uf_clean}"
         part_path.mkdir(parents=True, exist_ok=True)
-        data_df = group_df.drop(columns=["uf"]).reset_index(drop=True)
-        data_df.to_parquet(part_path / "part-00000.parquet", index=False)
+
+        out_df = group_df.drop(columns=["uf"]).reset_index(drop=True)
+        out_df.to_parquet(part_path / "part-00000.parquet", index=False)
+        parts_written += 1
+        total_rows += len(out_df)
+
+    print(f"  [SILVER IBGE] particoes(uf)={parts_written} | linhas={total_rows}")
 
 
 def run_job() -> None:
-    if not INPUT_JSON_PATH.exists():
-        raise FileNotFoundError(f"Arquivo de entrada nao encontrado: {INPUT_JSON_PATH}")
-
-    spark = _build_spark_session()
-    try:
-        ingest_ts = datetime.now(timezone.utc)
-
-        raw_df = spark.read.option("multiline", "true").json(str(INPUT_JSON_PATH))
-        cols = set(raw_df.columns)
-
-        # Resolve UF e Regiao tanto pela hierarquia classica (microrregiao -> mesorregiao -> UF -> regiao)
-        # quanto por fallback em `regiao-imediata.regiao-intermediaria.UF` caso algum registro varie
-        if "microrregiao" in cols:
-            micro_nome = F.trim(F.col("microrregiao.nome"))
-            meso_nome = F.trim(F.col("microrregiao.mesorregiao.nome"))
-            uf_id = F.col("microrregiao.mesorregiao.UF.id")
-            uf_sigla = F.upper(F.trim(F.col("microrregiao.mesorregiao.UF.sigla")))
-            uf_nome = F.trim(F.col("microrregiao.mesorregiao.UF.nome"))
-            reg_id = F.col("microrregiao.mesorregiao.UF.regiao.id")
-            reg_sigla = F.upper(F.trim(F.col("microrregiao.mesorregiao.UF.regiao.sigla")))
-            reg_nome = F.trim(F.col("microrregiao.mesorregiao.UF.regiao.nome"))
-        else:
-            micro_nome = F.lit(None).cast(StringType())
-            meso_nome = F.lit(None).cast(StringType())
-            uf_id = F.lit(None).cast(IntegerType())
-            uf_sigla = F.lit(None).cast(StringType())
-            uf_nome = F.lit(None).cast(StringType())
-            reg_id = F.lit(None).cast(IntegerType())
-            reg_sigla = F.lit(None).cast(StringType())
-            reg_nome = F.lit(None).cast(StringType())
-
-        if "`regiao-imediata`" in [f"`{c}`" for c in cols]:
-            im_uf_id = F.col("`regiao-imediata`.`regiao-intermediaria`.UF.id")
-            im_uf_sigla = F.upper(F.trim(F.col("`regiao-imediata`.`regiao-intermediaria`.UF.sigla")))
-            im_uf_nome = F.trim(F.col("`regiao-imediata`.`regiao-intermediaria`.UF.nome"))
-            im_reg_id = F.col("`regiao-imediata`.`regiao-intermediaria`.UF.regiao.id")
-            im_reg_sigla = F.upper(
-                F.trim(F.col("`regiao-imediata`.`regiao-intermediaria`.UF.regiao.sigla"))
-            )
-            im_reg_nome = F.trim(F.col("`regiao-imediata`.`regiao-intermediaria`.UF.regiao.nome"))
-
-            uf_id = F.coalesce(uf_id, im_uf_id)
-            uf_sigla = F.coalesce(uf_sigla, im_uf_sigla)
-            uf_nome = F.coalesce(uf_nome, im_uf_nome)
-            reg_id = F.coalesce(reg_id, im_reg_id)
-            reg_sigla = F.coalesce(reg_sigla, im_reg_sigla)
-            reg_nome = F.coalesce(reg_nome, im_reg_nome)
-
-        extracted_df = (
-            raw_df.select(
-                F.col("id").cast(IntegerType()).alias("codigo_ibge"),
-                F.trim(F.col("nome")).cast(StringType()).alias("nome_municipio"),
-                uf_id.cast(IntegerType()).alias("codigo_uf"),
-                uf_sigla.cast(StringType()).alias("sigla_uf"),
-                uf_nome.cast(StringType()).alias("nome_uf"),
-                reg_id.cast(IntegerType()).alias("codigo_regiao"),
-                reg_sigla.cast(StringType()).alias("sigla_regiao"),
-                reg_nome.cast(StringType()).alias("nome_regiao"),
-                meso_nome.cast(StringType()).alias("mesorregiao"),
-                micro_nome.cast(StringType()).alias("microrregiao"),
-            )
-            .filter(
-                F.col("codigo_ibge").isNotNull()
-                & F.col("nome_municipio").isNotNull()
-                & F.col("sigla_uf").isNotNull()
-                & (F.length(F.col("sigla_uf")) == 2)
-            )
-        )
-
-        # Deduplicacao estrita pela chave `codigo_ibge` para idempotencia
-        dedup_window = Window.partitionBy("codigo_ibge").orderBy(
-            F.col("nome_municipio").asc(), F.col("sigla_uf").asc()
-        )
-        typed_df = (
-            extracted_df.withColumn("_rn", F.row_number().over(dedup_window))
-            .filter(F.col("_rn") == 1)
-            .drop("_rn")
-            .withColumn("data_ingestao_utc", F.lit(ingest_ts).cast(TimestampType()))
-            .withColumn("uf", F.col("sigla_uf").cast(StringType()))
-            .select(
-                "codigo_ibge",
-                "nome_municipio",
-                "codigo_uf",
-                "sigla_uf",
-                "nome_uf",
-                "codigo_regiao",
-                "sigla_regiao",
-                "nome_regiao",
-                "mesorregiao",
-                "microrregiao",
-                "data_ingestao_utc",
-                "uf",
-            )
-        )
-
-        expected_cols = [field.name for field in SILVER_SCHEMA.fields]
-        missing_cols = [c for c in expected_cols if c not in typed_df.columns]
-        if missing_cols:
-            raise ValueError(f"Colunas ausentes em relacao ao DDL: {missing_cols}")
-
-        row_count = typed_df.count()
-        _write_partitioned_parquet_idempotent(typed_df, OUTPUT_SILVER_DIR)
-
-        print(
-            f"[OK] silver_municipios_ibge gravado em {OUTPUT_SILVER_DIR} | linhas={row_count}"
-        )
-    finally:
-        spark.stop()
+    files = _find_ibge_files()
+    raw_df = _load_ibge_df(files)
+    silver_df = _normalize_ibge(raw_df)
+    _write_idempotent_by_uf(silver_df, SILVER_IBGE_DIR)
+    print("[OK] Silver IBGE concluido com sucesso (pandas + pyarrow).")
 
 
 if __name__ == "__main__":

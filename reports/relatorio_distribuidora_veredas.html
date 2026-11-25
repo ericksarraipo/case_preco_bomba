@@ -1,0 +1,285 @@
+Aqui está o HTML completo incorporando uma **seção executiva dedicada às 4 perguntas de negócio** (incluindo os achados já presentes nos dados, a regra dos `70%` e sazonalidade do etanol, o comparativo nominal × IPCA e a diretriz sobre postos/bandeiras e limites da base), preservando o estilo e as seções originais:
+
+```html
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Relatorio Executivo — Distribuidora Veredas (Camada Ouro)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 24px; color: #0f172a; background: #f8fafc; }
+  .container { max-width: 1180px; margin: 0 auto; }
+  h1 { margin: 0 0 6px 0; font-size: 24px; }
+  .subtitle { color: #475569; margin: 0 0 20px 0; font-size: 14px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
+  .card .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .value { font-size: 22px; font-weight: 700; margin-top: 6px; color: #0f172a; }
+  .section { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin-bottom: 20px; }
+  .section h2 { margin: 0 0 12px 0; font-size: 18px; }
+  .qa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .qa-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
+  .qa-box h3 { margin: 0 0 8px 0; font-size: 15px; color: #0f172a; }
+  .qa-box p { margin: 0 0 8px 0; font-size: 13px; line-height: 1.45; color: #334155; }
+  .qa-box p:last-child { margin-bottom: 0; }
+  .note { background: #fffbeb; border-left: 4px solid #d97706; padding: 10px 14px; border-radius: 4px; font-size: 13px; color: #78350f; margin-bottom: 14px; }
+  .info { background: #eff6ff; border-left: 4px solid #2563eb; padding: 10px 14px; border-radius: 4px; font-size: 13px; color: #1e3a8a; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { border-bottom: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
+  th { background: #f1f5f9; font-weight: 600; color: #334155; }
+  td.num, th.num { text-align: right; }
+  .svg-wrap { overflow-x: auto; padding: 8px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Distribuidora Veredas — Analise de Precos, IPCA e Teto de Reembolso</h1>
+  <p class="subtitle">Camada Ouro (Medallion) | Periodo: 2024-01 a 2026-10 (34 meses) | Gerado em: 2026-11-25 19:46 UTC</p>
+
+  <div class="kpis">
+    <div class="card"><div class="label">Total de Coletas</div><div class="value">1.179.427</div></div>
+    <div class="card"><div class="label">Meses Cobertos</div><div class="value">34</div></div>
+    <div class="card"><div class="label">Cobertura Media IBGE</div><div class="value">63,76%</div></div>
+    <div class="card"><div class="label">Linhas Acima do Teto</div><div class="value">351</div></div>
+    <div class="card"><div class="label">Linhas Mart Detalhe</div><div class="value">13.498</div></div>
+  </div>
+
+  <div class="section">
+    <h2>0. Respostas Executivas às 4 Perguntas de Negócio</h2>
+    <div class="qa-grid">
+      <div class="qa-box">
+        <h3>1. Teto × Preço de Bomba (R$/L)</h3>
+        <p><strong>Foco na gasolina comum</strong> pela vigência exata na data da coleta. Quando o teto fica abaixo da bomba, o vendedor cobre a diferença.</p>
+        <p>Maiores pressões recorrentes (34 meses acima) aparecem em <strong>AM</strong> (+R$ 0,969 / +16,16%), <strong>RR</strong> (+R$ 0,840 / +14,00%) e <strong>AC</strong> (+R$ 0,840 / +12,90%), além de episódios em UFs como AL, TO, SE, CE, MA e SP.</p>
+      </div>
+      <div class="qa-box">
+        <h3>2. Etanol ≤ 70% e Sazonalidade</h3>
+        <p>Compensa abastecer com etanol onde <strong>preço do etanol / gasolina comum ≤ 0,70</strong>, avaliando por município e mês para capturar a sazonalidade (safra vs. entressafra).</p>
+        <p>Municípios sem coleta da ANP no mês permanecem como <strong>sem cobertura</strong> (sem estimativa artificial), e médias estaduais são amostrais.</p>
+      </div>
+      <div class="qa-box">
+        <h3>3. Combustível × Inflação (IPCA 433)</h3>
+        <p>Com base explícita no IPCA (série 433), o preço nominal ponderado passou de <strong>R$ 4,759</strong> (2024-01) para <strong>R$ 5,546</strong> (2026-10), enquanto o preço real variou de <strong>4,759</strong> para <strong>4,895</strong> (pico real de <strong>5,282</strong> em 2026-04).</p>
+        <p>Comparar a evolução real do preço e do teto separa pressão inflacionária de defasagem real da política.</p>
+      </div>
+      <div class="qa-box">
+        <h3>4. Postos, Bandeiras e Bandeira Branca</h3>
+        <p>A dispersão intraurbana exige <strong>critério mínimo de postos</strong> por município/bandeira antes de comparar preços e evitar distorções por amostra reduzida.</p>
+        <p><strong>Bandeira branca</strong> só deve ser priorizada onde houver vantagem consistente e base representativa, respeitando regras de conformidade e rota.</p>
+      </div>
+    </div>
+    <div class="info">
+      <strong>Limites dos dados para a decisão:</strong> A base da ANP é amostral (não cobre 100% dos municípios/meses) e não contempla descontos corporativos/frota, postos conveniados, desvio de rota ou qualidade/adulteração na bomba.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>1. Evolu&#231;&#227;o Mensal do Pre&#231;o M&#233;dio Ponderado (R$/L)</h2>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1120 195" style="width: 100%; height: auto; display: block;" xmlns="http://www.w3.org/2000/svg">
+  <line x1="52" y1="20" x2="1108" y2="20" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,3" />
+  <text x="46" y="23" font-size="10" fill="#64748b" text-anchor="end">R$ 6,00</text>
+  <line x1="52" y1="63" x2="1108" y2="63" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,3" />
+  <text x="46" y="66" font-size="10" fill="#64748b" text-anchor="end">R$ 5,50</text>
+  <line x1="52" y1="107" x2="1108" y2="107" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,3" />
+  <text x="46" y="110" font-size="10" fill="#64748b" text-anchor="end">R$ 5,00</text>
+  <line x1="52" y1="150" x2="1108" y2="150" stroke="#94a3b8" stroke-width="1" />
+  <text x="46" y="153" font-size="10" fill="#64748b" text-anchor="end">R$ 4,50</text>
+  <rect x="58" y="128" width="22" height="22" rx="3" fill="#2563eb"><title>24-01: R$ 4,759</title></rect><text x="69.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 69.0,168)">24-01</text>
+  <rect x="89" y="115" width="22" height="35" rx="3" fill="#2563eb"><title>24-02: R$ 4,899</title></rect><text x="100.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 100.0,168)">24-02</text>
+  <rect x="120" y="115" width="22" height="35" rx="3" fill="#2563eb"><title>24-03: R$ 4,899</title></rect><text x="131.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 131.0,168)">24-03</text>
+  <rect x="151" y="106" width="22" height="44" rx="3" fill="#2563eb"><title>24-04: R$ 5,007</title></rect><text x="162.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 162.0,168)">24-04</text>
+  <rect x="182" y="101" width="22" height="49" rx="3" fill="#2563eb"><title>24-05: R$ 5,061</title></rect><text x="193.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 193.0,168)">24-05</text>
+  <rect x="213" y="102" width="22" height="48" rx="3" fill="#2563eb"><title>24-06: R$ 5,055</title></rect><text x="224.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 224.0,168)">24-06</text>
+  <rect x="244" y="84" width="22" height="66" rx="3" fill="#2563eb"><title>24-07: R$ 5,210</title></rect><text x="255.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 255.0,168)">24-07</text>
+  <rect x="275" y="82" width="22" height="68" rx="3" fill="#2563eb"><title>24-08: R$ 5,280</title></rect><text x="286.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 286.0,168)">24-08</text>
+  <rect x="306" y="84" width="22" height="66" rx="3" fill="#2563eb"><title>24-09: R$ 5,260</title></rect><text x="317.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 317.0,168)">24-09</text>
+  <rect x="337" y="85" width="22" height="65" rx="3" fill="#2563eb"><title>24-10: R$ 5,253</title></rect><text x="348.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 348.0,168)">24-10</text>
+  <rect x="368" y="85" width="22" height="65" rx="3" fill="#2563eb"><title>24-11: R$ 5,254</title></rect><text x="379.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 379.0,168)">24-11</text>
+  <rect x="399" y="81" width="22" height="69" rx="3" fill="#2563eb"><title>24-12: R$ 5,296</title></rect><text x="410.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 410.0,168)">24-12</text>
+  <rect x="430" y="75" width="22" height="75" rx="3" fill="#2563eb"><title>25-01: R$ 5,363</title></rect><text x="441.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 441.0,168)">25-01</text>
+  <rect x="461" y="60" width="22" height="90" rx="3" fill="#2563eb"><title>25-02: R$ 5,546</title></rect><text x="472.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 472.0,168)">25-02</text>
+  <rect x="492" y="61" width="22" height="89" rx="3" fill="#2563eb"><title>25-03: R$ 5,535</title></rect><text x="503.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 503.0,168)">25-03</text>
+  <rect x="523" y="64" width="22" height="86" rx="3" fill="#2563eb"><title>25-04: R$ 5,499</title></rect><text x="534.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 534.0,168)">25-04</text>
+  <rect x="554" y="66" width="22" height="84" rx="3" fill="#2563eb"><title>25-05: R$ 5,472</title></rect><text x="565.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 565.0,168)">25-05</text>
+  <rect x="585" y="71" width="22" height="79" rx="3" fill="#2563eb"><title>25-06: R$ 5,408</title></rect><text x="596.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 596.0,168)">25-06</text>
+  <rect x="616" y="74" width="22" height="76" rx="3" fill="#2563eb"><title>25-07: R$ 5,381</title></rect><text x="627.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 627.0,168)">25-07</text>
+  <rect x="647" y="76" width="22" height="74" rx="3" fill="#2563eb"><title>25-08: R$ 5,359</title></rect><text x="658.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 658.0,168)">25-08</text>
+  <rect x="678" y="73" width="22" height="77" rx="3" fill="#2563eb"><title>25-09: R$ 5,393</title></rect><text x="689.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 689.0,168)">25-09</text>
+  <rect x="709" y="71" width="22" height="79" rx="3" fill="#2563eb"><title>25-10: R$ 5,417</title></rect><text x="720.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 720.0,168)">25-10</text>
+  <rect x="740" y="72" width="22" height="78" rx="3" fill="#2563eb"><title>25-11: R$ 5,399</title></rect><text x="751.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 751.0,168)">25-11</text>
+  <rect x="771" y="68" width="22" height="82" rx="3" fill="#2563eb"><title>25-12: R$ 5,445</title></rect><text x="782.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 782.0,168)">25-12</text>
+  <rect x="802" y="56" width="22" height="94" rx="3" fill="#2563eb"><title>26-01: R$ 5,592</title></rect><text x="813.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 813.0,168)">26-01</text>
+  <rect x="833" y="54" width="22" height="96" rx="3" fill="#2563eb"><title>26-02: R$ 5,610</title></rect><text x="844.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 844.0,168)">26-02</text>
+  <rect x="864" y="36" width="22" height="114" rx="3" fill="#2563eb"><title>26-03: R$ 5,813</title></rect><text x="875.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 875.0,168)">26-03</text>
+  <rect x="895" y="29" width="22" height="121" rx="3" fill="#1d4ed8"><title>26-04: R$ 5,899 (pico)</title></rect><text x="906.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 906.0,168)">26-04</text>
+  <rect x="926" y="43" width="22" height="107" rx="3" fill="#2563eb"><title>26-05: R$ 5,738</title></rect><text x="937.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 937.0,168)">26-05</text>
+  <rect x="957" y="51" width="22" height="99" rx="3" fill="#2563eb"><title>26-06: R$ 5,648</title></rect><text x="968.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 968.0,168)">26-06</text>
+  <rect x="988" y="57" width="22" height="93" rx="3" fill="#2563eb"><title>26-07: R$ 5,577</title></rect><text x="999.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 999.0,168)">26-07</text>
+  <rect x="1019" y="63" width="22" height="87" rx="3" fill="#2563eb"><title>26-08: R$ 5,507</title></rect><text x="1030.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 1030.0,168)">26-08</text>
+  <rect x="1050" y="61" width="22" height="89" rx="3" fill="#2563eb"><title>26-09: R$ 5,533</title></rect><text x="1061.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 1061.0,168)">26-09</text>
+  <rect x="1081" y="60" width="22" height="90" rx="3" fill="#2563eb"><title>26-10: R$ 5,546</title></rect><text x="1092.0" y="168" font-size="9" fill="#475569" text-anchor="middle" transform="rotate(45 1092.0,168)">26-10</text>
+</svg>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Ano-Mes</th>
+          <th class="num">Coletas</th>
+          <th class="num">Preco Nominal Pond.</th>
+          <th class="num">Preco Real (IPCA)</th>
+          <th class="num">Qtd Acima Teto</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>2024-01</td><td class='num'>42.922</td><td class='num'>R$ 4,759</td><td class='num'>4,759</td><td class='num'>5</td></tr>
+        <tr><td>2024-02</td><td class='num'>36.721</td><td class='num'>R$ 4,899</td><td class='num'>4,858</td><td class='num'>20</td></tr>
+        <tr><td>2024-03</td><td class='num'>35.863</td><td class='num'>R$ 4,899</td><td class='num'>4,851</td><td class='num'>19</td></tr>
+        <tr><td>2024-04</td><td class='num'>42.481</td><td class='num'>R$ 5,007</td><td class='num'>4,939</td><td class='num'>22</td></tr>
+        <tr><td>2024-05</td><td class='num'>37.531</td><td class='num'>R$ 5,061</td><td class='num'>4,969</td><td class='num'>25</td></tr>
+        <tr><td>2024-06</td><td class='num'>35.778</td><td class='num'>R$ 5,055</td><td class='num'>4,953</td><td class='num'>24</td></tr>
+        <tr><td>2024-07</td><td class='num'>38.339</td><td class='num'>R$ 5,210</td><td class='num'>5,086</td><td class='num'>8</td></tr>
+        <tr><td>2024-08</td><td class='num'>32.189</td><td class='num'>R$ 5,280</td><td class='num'>5,155</td><td class='num'>12</td></tr>
+        <tr><td>2024-09</td><td class='num'>35.636</td><td class='num'>R$ 5,260</td><td class='num'>5,113</td><td class='num'>10</td></tr>
+        <tr><td>2024-10</td><td class='num'>34.800</td><td class='num'>R$ 5,253</td><td class='num'>5,078</td><td class='num'>11</td></tr>
+        <tr><td>2024-11</td><td class='num'>30.106</td><td class='num'>R$ 5,254</td><td class='num'>5,059</td><td class='num'>13</td></tr>
+        <tr><td>2024-12</td><td class='num'>34.549</td><td class='num'>R$ 5,296</td><td class='num'>5,073</td><td class='num'>14</td></tr>
+        <tr><td>2025-01</td><td class='num'>32.972</td><td class='num'>R$ 5,363</td><td class='num'>5,129</td><td class='num'>3</td></tr>
+        <tr><td>2025-02</td><td class='num'>31.423</td><td class='num'>R$ 5,546</td><td class='num'>5,236</td><td class='num'>6</td></tr>
+        <tr><td>2025-03</td><td class='num'>36.657</td><td class='num'>R$ 5,535</td><td class='num'>5,196</td><td class='num'>6</td></tr>
+        <tr><td>2025-04</td><td class='num'>35.217</td><td class='num'>R$ 5,499</td><td class='num'>5,140</td><td class='num'>5</td></tr>
+        <tr><td>2025-05</td><td class='num'>33.250</td><td class='num'>R$ 5,472</td><td class='num'>5,102</td><td class='num'>5</td></tr>
+        <tr><td>2025-06</td><td class='num'>35.503</td><td class='num'>R$ 5,408</td><td class='num'>5,030</td><td class='num'>5</td></tr>
+        <tr><td>2025-07</td><td class='num'>31.945</td><td class='num'>R$ 5,381</td><td class='num'>4,992</td><td class='num'>3</td></tr>
+        <tr><td>2025-08</td><td class='num'>26.467</td><td class='num'>R$ 5,359</td><td class='num'>4,977</td><td class='num'>3</td></tr>
+        <tr><td>2025-09</td><td class='num'>31.637</td><td class='num'>R$ 5,393</td><td class='num'>4,984</td><td class='num'>3</td></tr>
+        <tr><td>2025-10</td><td class='num'>30.782</td><td class='num'>R$ 5,417</td><td class='num'>5,003</td><td class='num'>3</td></tr>
+        <tr><td>2025-11</td><td class='num'>30.385</td><td class='num'>R$ 5,399</td><td class='num'>4,977</td><td class='num'>3</td></tr>
+        <tr><td>2025-12</td><td class='num'>36.970</td><td class='num'>R$ 5,445</td><td class='num'>5,003</td><td class='num'>3</td></tr>
+        <tr><td>2026-01</td><td class='num'>31.966</td><td class='num'>R$ 5,592</td><td class='num'>5,121</td><td class='num'>3</td></tr>
+        <tr><td>2026-02</td><td class='num'>31.779</td><td class='num'>R$ 5,610</td><td class='num'>5,101</td><td class='num'>3</td></tr>
+        <tr><td>2026-03</td><td class='num'>37.818</td><td class='num'>R$ 5,813</td><td class='num'>5,240</td><td class='num'>13</td></tr>
+        <tr><td>2026-04</td><td class='num'>34.289</td><td class='num'>R$ 5,899</td><td class='num'>5,282</td><td class='num'>16</td></tr>
+        <tr><td>2026-05</td><td class='num'>32.438</td><td class='num'>R$ 5,738</td><td class='num'>5,108</td><td class='num'>17</td></tr>
+        <tr><td>2026-06</td><td class='num'>37.993</td><td class='num'>R$ 5,648</td><td class='num'>5,020</td><td class='num'>17</td></tr>
+        <tr><td>2026-07</td><td class='num'>35.188</td><td class='num'>R$ 5,577</td><td class='num'>4,953</td><td class='num'>16</td></tr>
+        <tr><td>2026-08</td><td class='num'>36.872</td><td class='num'>R$ 5,507</td><td class='num'>4,907</td><td class='num'>12</td></tr>
+        <tr><td>2026-09</td><td class='num'>36.082</td><td class='num'>R$ 5,533</td><td class='num'>4,891</td><td class='num'>12</td></tr>
+        <tr><td>2026-10</td><td class='num'>34.879</td><td class='num'>R$ 5,546</td><td class='num'>4,895</td><td class='num'>11</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>2. Top 15 Combinacoes UF x Produto Acima do Teto de Reembolso</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>UF</th>
+          <th>Produto</th>
+          <th class="num">Meses Acima</th>
+          <th class="num">Coletas</th>
+          <th class="num">Delta Medio</th>
+          <th class="num">% Medio Teto</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>AM</strong></td><td>GASOLINA COMUM</td><td class='num'>34</td><td class='num'>8.183</td><td class='num'>+R$ 0,969</td><td class='num'>+16,16%</td></tr>
+        <tr><td><strong>RR</strong></td><td>GASOLINA COMUM</td><td class='num'>34</td><td class='num'>2.292</td><td class='num'>+R$ 0,840</td><td class='num'>+14,00%</td></tr>
+        <tr><td><strong>AC</strong></td><td>GASOLINA COMUM</td><td class='num'>34</td><td class='num'>2.213</td><td class='num'>+R$ 0,840</td><td class='num'>+12,90%</td></tr>
+        <tr><td><strong>AL</strong></td><td>GASOLINA COMUM</td><td class='num'>20</td><td class='num'>4.851</td><td class='num'>+R$ 0,255</td><td class='num'>+4,26%</td></tr>
+        <tr><td><strong>TO</strong></td><td>GASOLINA COMUM</td><td class='num'>19</td><td class='num'>3.387</td><td class='num'>+R$ 0,122</td><td class='num'>+1,90%</td></tr>
+        <tr><td><strong>SE</strong></td><td>GASOLINA COMUM</td><td class='num'>18</td><td class='num'>2.815</td><td class='num'>+R$ 0,415</td><td class='num'>+6,90%</td></tr>
+        <tr><td><strong>CE</strong></td><td>GASOLINA COMUM</td><td class='num'>16</td><td class='num'>9.293</td><td class='num'>+R$ 0,278</td><td class='num'>+4,34%</td></tr>
+        <tr><td><strong>MA</strong></td><td>GASOLINA COMUM</td><td class='num'>15</td><td class='num'>6.880</td><td class='num'>+R$ 0,249</td><td class='num'>+3,98%</td></tr>
+        <tr><td><strong>SP</strong></td><td>GASOLINA COMUM</td><td class='num'>15</td><td class='num'>80.338</td><td class='num'>+R$ 0,097</td><td class='num'>+1,66%</td></tr>
+        <tr><td><strong>PA</strong></td><td>GASOLINA COMUM</td><td class='num'>14</td><td class='num'>6.437</td><td class='num'>+R$ 0,142</td><td class='num'>+2,19%</td></tr>
+        <tr><td><strong>DF</strong></td><td>GASOLINA COMUM</td><td class='num'>13</td><td class='num'>2.733</td><td class='num'>+R$ 0,191</td><td class='num'>+3,28%</td></tr>
+        <tr><td><strong>PE</strong></td><td>GASOLINA COMUM</td><td class='num'>12</td><td class='num'>9.270</td><td class='num'>+R$ 0,202</td><td class='num'>+3,45%</td></tr>
+        <tr><td><strong>RJ</strong></td><td>GASOLINA COMUM</td><td class='num'>12</td><td class='num'>17.075</td><td class='num'>+R$ 0,117</td><td class='num'>+1,85%</td></tr>
+        <tr><td><strong>BA</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>10.910</td><td class='num'>+R$ 0,237</td><td class='num'>+3,68%</td></tr>
+        <tr><td><strong>PB</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.865</td><td class='num'>+R$ 0,119</td><td class='num'>+1,94%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>3. Auditoria de Excecoes e Anomalias de Vigencia (BA, PR e Vigencia Fim Nula)</h2>
+    <div class="note">
+      Valores originais preservados sem imputacao artificial. As excecoes de vigencia e regras estaduais permanecem rastreaveis para auditoria.
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>UF</th>
+          <th>Produto</th>
+          <th class="num">Meses</th>
+          <th class="num">Coletas</th>
+          <th class="num">Preco Medio</th>
+          <th class="num">Teto Medio</th>
+          <th class="num">Qtd Acima Teto</th>
+          <th class="num">Vig. Fim Nula</th>
+          <th>Detalhe da Anomalia</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>AC</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>412</td><td class='num'>R$ 5,306</td><td class='num'>R$ 6,700</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AC</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>503</td><td class='num'>R$ 7,447</td><td class='num'>R$ 6,700</td><td class='num'>10</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AL</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>2.134</td><td class='num'>R$ 5,132</td><td class='num'>R$ 6,600</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AL</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.471</td><td class='num'>R$ 6,744</td><td class='num'>R$ 6,600</td><td class='num'>8</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AM</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.530</td><td class='num'>R$ 5,234</td><td class='num'>R$ 6,450</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AM</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.334</td><td class='num'>R$ 7,333</td><td class='num'>R$ 6,450</td><td class='num'>10</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AP</strong></td><td>ETANOL</td><td class='num'>9</td><td class='num'>43</td><td class='num'>R$ 5,863</td><td class='num'>R$ 7,000</td><td class='num'>0</td><td class='num'>9</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>AP</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>536</td><td class='num'>R$ 6,434</td><td class='num'>R$ 7,000</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>BA</strong></td><td>ETANOL</td><td class='num'>34</td><td class='num'>29.815</td><td class='num'>R$ 4,724</td><td class='num'>R$ 6,597</td><td class='num'>0</td><td class='num'>10</td><td>Lacuna entre 2025-01-01 e 2025-01-10 (apos versao 2) | obs: aprovação atrasada no comitê</td></tr>
+        <tr><td><strong>BA</strong></td><td>GASOLINA COMUM</td><td class='num'>34</td><td class='num'>33.238</td><td class='num'>R$ 6,482</td><td class='num'>R$ 6,597</td><td class='num'>10</td><td class='num'>10</td><td>Lacuna entre 2025-01-01 e 2025-01-10 (apos versao 2) | obs: aprovação atrasada no comitê</td></tr>
+        <tr><td><strong>CE</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>5.116</td><td class='num'>R$ 5,250</td><td class='num'>R$ 6,500</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>CE</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>5.880</td><td class='num'>R$ 6,818</td><td class='num'>R$ 6,500</td><td class='num'>8</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>DF</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.081</td><td class='num'>R$ 4,537</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>DF</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.115</td><td class='num'>R$ 6,461</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>ES</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>2.597</td><td class='num'>R$ 4,814</td><td class='num'>R$ 7,050</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>ES</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>3.711</td><td class='num'>R$ 6,507</td><td class='num'>R$ 7,050</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>GO</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>7.073</td><td class='num'>R$ 4,464</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>GO</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>7.284</td><td class='num'>R$ 6,562</td><td class='num'>R$ 6,750</td><td class='num'>2</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MA</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>2.434</td><td class='num'>R$ 5,252</td><td class='num'>R$ 6,350</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MA</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>4.308</td><td class='num'>R$ 6,607</td><td class='num'>R$ 6,350</td><td class='num'>8</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MG</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>19.366</td><td class='num'>R$ 4,392</td><td class='num'>R$ 6,500</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MG</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>20.624</td><td class='num'>R$ 6,325</td><td class='num'>R$ 6,500</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MS</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.498</td><td class='num'>R$ 4,202</td><td class='num'>R$ 6,600</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MS</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.396</td><td class='num'>R$ 6,503</td><td class='num'>R$ 6,600</td><td class='num'>3</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MT</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>3.333</td><td class='num'>R$ 4,198</td><td class='num'>R$ 6,900</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>MT</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>3.434</td><td class='num'>R$ 6,705</td><td class='num'>R$ 6,900</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PA</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.922</td><td class='num'>R$ 5,043</td><td class='num'>R$ 6,600</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PA</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>4.424</td><td class='num'>R$ 6,717</td><td class='num'>R$ 6,600</td><td class='num'>8</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PB</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>2.373</td><td class='num'>R$ 4,721</td><td class='num'>R$ 6,400</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PB</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.839</td><td class='num'>R$ 6,391</td><td class='num'>R$ 6,400</td><td class='num'>6</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PE</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>6.765</td><td class='num'>R$ 5,156</td><td class='num'>R$ 6,850</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PE</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>7.818</td><td class='num'>R$ 6,848</td><td class='num'>R$ 6,850</td><td class='num'>5</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PI</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.697</td><td class='num'>R$ 4,875</td><td class='num'>R$ 6,600</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PI</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.414</td><td class='num'>R$ 6,564</td><td class='num'>R$ 6,600</td><td class='num'>7</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>PR</strong></td><td>ETANOL</td><td class='num'>34</td><td class='num'>38.868</td><td class='num'>R$ 4,305</td><td class='num'>R$ 6,496</td><td class='num'>0</td><td class='num'>10</td><td>Sobreposicao a partir de 2025-06-15 com vigencia anterior ate 2025-06-30 (versao anterior: 3) | obs: reajuste antecipado a pedido da regional Sul</td></tr>
+        <tr><td><strong>PR</strong></td><td>GASOLINA COMUM</td><td class='num'>34</td><td class='num'>40.646</td><td class='num'>R$ 6,336</td><td class='num'>R$ 6,488</td><td class='num'>7</td><td class='num'>10</td><td>Sobreposicao a partir de 2025-06-15 com vigencia anterior ate 2025-06-30 (versao anterior: 3) | obs: reajuste antecipado a pedido da regional Sul</td></tr>
+        <tr><td><strong>RJ</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>11.491</td><td class='num'>R$ 4,943</td><td class='num'>R$ 6,550</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RJ</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>13.437</td><td class='num'>R$ 6,599</td><td class='num'>R$ 6,550</td><td class='num'>7</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RN</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.670</td><td class='num'>R$ 5,474</td><td class='num'>R$ 6,850</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RN</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>1.841</td><td class='num'>R$ 6,762</td><td class='num'>R$ 6,850</td><td class='num'>2</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RO</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.331</td><td class='num'>R$ 5,461</td><td class='num'>R$ 7,500</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RO</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>2.276</td><td class='num'>R$ 7,272</td><td class='num'>R$ 7,500</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RR</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>313</td><td class='num'>R$ 5,411</td><td class='num'>R$ 6,350</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RR</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>602</td><td class='num'>R$ 7,479</td><td class='num'>R$ 6,350</td><td class='num'>10</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RS</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>6.459</td><td class='num'>R$ 4,922</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>RS</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>13.786</td><td class='num'>R$ 6,382</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>SC</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>4.686</td><td class='num'>R$ 4,776</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>SC</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>7.102</td><td class='num'>R$ 6,538</td><td class='num'>R$ 6,750</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>SE</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>919</td><td class='num'>R$ 5,278</td><td class='num'>R$ 6,600</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>SE</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>1.590</td><td class='num'>R$ 6,955</td><td class='num'>R$ 6,600</td><td class='num'>8</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>SP</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>51.589</td><td class='num'>R$ 4,097</td><td class='num'>R$ 6,400</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>SP</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>52.685</td><td class='num'>R$ 6,407</td><td class='num'>R$ 6,400</td><td class='num'>5</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>TO</strong></td><td>ETANOL</td><td class='num'>10</td><td class='num'>1.193</td><td class='num'>R$ 5,178</td><td class='num'>R$ 6,900</td><td class='num'>0</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+        <tr><td><strong>TO</strong></td><td>GASOLINA COMUM</td><td class='num'>10</td><td class='num'>1.481</td><td class='num'>R$ 6,934</td><td class='num'>R$ 6,900</td><td class='num'>8</td><td class='num'>10</td><td>Sem detalhe</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>
