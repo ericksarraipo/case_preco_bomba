@@ -2,313 +2,261 @@
 JOB: transform_silver_precos_combustiveis
 CAMADA: Prata (Silver)
 LE:
-  - data/raw/anp/*.csv (34 arquivos mensais SHPC ANP, jan/2024 a out/2026)
-  - data/silver/silver_municipios_ibge (dimensao de municipios para enriquecer codigo_ibge)
+  - data/raw/anp ou data/bronze (arquivos CSV/Parquet/JSON de precos ANP)
+  - data/raw/ibge_municipios.json (opcional, para preencher codigo_ibge_municipio por UF+Municipio quando ausente)
 GRAVA:
-  - data/silver/silver_precos_combustiveis (Parquet particionado por coluna `ano_mes`)
-GRAO:
-  - 1 linha por coleta de preco por revenda, produto e data (`cnpj_revenda`, `produto`, `data_coleta`)
-REGRAS APLICADAS:
-  1. Filtra o periodo (`PERIODO_INICIO` a `PERIODO_FIM`) e produtos configurados (`PRODUTOS_ALVO`).
-  2. Normaliza colunas da ANP (separador `;`, encoding com fallback, datas `dd/MM/yyyy` e decimais com virgula).
-  3. Enriquece `codigo_ibge_municipio` via cruzamento com `silver_municipios_ibge` (`uf` + nome normalizado), preservando `NULL` quando nao houver match exato.
-  4. Deduplica pelo grao (`cnpj_revenda`, `produto`, `data_coleta`) para garantir idempotencia e grava por particao `ano_mes` (`YYYY-MM`).
+  - data/silver/silver_precos_combustiveis (particionado por `ano_mes`)
 """
 
 from datetime import datetime, timezone
-import os
+import json
 from pathlib import Path
 import shutil
-import sys
 import unicodedata
 
 import pandas as pd
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    DateType,
-    DecimalType,
-    IntegerType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-)
-
-# ==============================================================================
-# PARAMETROS DO JOB (CENTRALIZADOS NO TOPO)
-# ==============================================================================
-PERIODO_INICIO = "2024-01"
-PERIODO_FIM = "2026-10"
-PRODUTOS_ALVO = ["GASOLINA COMUM", "ETANOL"]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INPUT_ANP_DIR = PROJECT_ROOT / "data" / "raw" / "anp"
-INPUT_IBGE_SILVER_DIR = PROJECT_ROOT / "data" / "silver" / "silver_municipios_ibge"
-OUTPUT_SILVER_DIR = PROJECT_ROOT / "data" / "silver" / "silver_precos_combustiveis"
-
-SILVER_SCHEMA = StructType(
-    [
-        StructField("codigo_ibge_municipio", IntegerType(), nullable=True),
-        StructField("uf", StringType(), nullable=False),
-        StructField("municipio_anp", StringType(), nullable=False),
-        StructField("bairro", StringType(), nullable=True),
-        StructField("cep", StringType(), nullable=True),
-        StructField("revenda", StringType(), nullable=True),
-        StructField("cnpj_revenda", StringType(), nullable=False),
-        StructField("bandeira", StringType(), nullable=True),
-        StructField("produto", StringType(), nullable=False),
-        StructField("data_coleta", DateType(), nullable=False),
-        StructField("valor_venda", DecimalType(10, 4), nullable=False),
-        StructField("valor_compra", DecimalType(10, 4), nullable=True),
-        StructField("unidade_medida", StringType(), nullable=True),
-        StructField("arquivo_origem", StringType(), nullable=False),
-        StructField("data_ingestao_utc", TimestampType(), nullable=False),
-        StructField("ano_mes", StringType(), nullable=False),
-    ]
-)
-
-COLUMN_ALIASES = {
-    "uf": ["estado - sigla", "sigla da uf", "uf", "estado"],
-    "municipio_anp": ["municipio", "município", "nome do municipio"],
-    "bairro": ["bairro"],
-    "cep": ["cep"],
-    "revenda": ["revenda", "razao social", "razão social"],
-    "cnpj_revenda": ["cnpj da revenda", "cnpj"],
-    "bandeira": ["bandeira"],
-    "produto": ["produto"],
-    "data_coleta": ["data da coleta", "data coleta"],
-    "valor_venda": ["valor de venda", "preco venda", "preço venda"],
-    "valor_compra": ["valor de compra", "preco compra", "preço compra"],
-    "unidade_medida": ["unidade de medida", "unidade"],
-}
+RAW_ANP_DIR = PROJECT_ROOT / "data" / "raw" / "anp"
+BRONZE_DIR = PROJECT_ROOT / "data" / "bronze"
+RAW_IBGE_FILE = PROJECT_ROOT / "data" / "raw" / "ibge_municipios.json"
+SILVER_PRECOS_DIR = PROJECT_ROOT / "data" / "silver" / "silver_precos_combustiveis"
 
 
-def _norm_col_name(name: str) -> str:
-    nfkd = unicodedata.normalize("NFKD", name or "")
-    ascii_str = "".join(ch for ch in nfkd if not unicodedata.combining(ch))
-    return " ".join(ascii_str.lower().strip().split())
+def _norm_str(val: object) -> str:
+    if val is None or pd.isna(val):
+        return ""
+    text = str(val).strip().upper()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return " ".join(text.split())
 
 
-def _build_spark_session() -> SparkSession:
-    python_exe = sys.executable
-    os.environ["PYSPARK_PYTHON"] = python_exe
-    os.environ["PYSPARK_DRIVER_PYTHON"] = python_exe
-    return (
-        SparkSession.builder.appName("DistribuidoraVeredas_Silver_Precos_Combustiveis")
-        .master("local[1]")
-        .config("spark.sql.session.timeZone", "UTC")
-        .config("spark.sql.shuffle.partitions", "2")
-        .config("spark.sql.execution.arrow.pyspark.enabled", "false")
-        .config("spark.python.worker.reuse", "false")
-        .config("spark.driver.memory", "2g")
-        .config("spark.pyspark.python", python_exe)
-        .config("spark.pyspark.driver.python", python_exe)
-        .getOrCreate()
-    )
-
-
-def _detect_encoding(csv_path: Path) -> str:
-    raw_head = csv_path.read_bytes()[:65536]
-    for enc in ("utf-8", "cp1252", "latin1"):
+def _is_manifest_or_metadata(path: Path) -> bool:
+    name_l = path.name.lower()
+    if any(k in name_l for k in ["manifest", "metadata", "index", "status"]):
+        return True
+    if path.suffix.lower() == ".json":
         try:
-            raw_head.decode(enc)
-            return "UTF-8" if enc == "utf-8" else enc
-        except UnicodeDecodeError:
+            with path.open("r", encoding="utf-8") as f:
+                head = json.load(f)
+            sample = head[0] if isinstance(head, list) and head else (head if isinstance(head, dict) else {})
+            if isinstance(sample, dict) and {"file_path", "url"}.issubset(set(sample.keys())):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _find_precos_files() -> list[Path]:
+    search_roots = [d for d in [RAW_ANP_DIR, BRONZE_DIR] if d.exists()]
+    files: list[Path] = []
+    for root in search_roots:
+        for p in sorted(root.rglob("*")):
+            if not p.is_file() or p.suffix.lower() not in {".csv", ".parquet", ".json"}:
+                continue
+            if root == BRONZE_DIR and "reembolso" in str(p).lower():
+                continue
+            if _is_manifest_or_metadata(p):
+                continue
+            files.append(p)
+    if not files:
+        raise FileNotFoundError(
+            f"Nenhum arquivo de precos ANP encontrado em {RAW_ANP_DIR} ou {BRONZE_DIR}."
+        )
+    return files
+
+
+def _read_single_file(path: Path) -> pd.DataFrame:
+    ext = path.suffix.lower()
+    if ext == ".csv":
+        for sep in [";", ",", "\t"]:
+            try:
+                df = pd.read_csv(path, sep=sep, dtype=str, low_memory=False)
+                if len(df.columns) > 1:
+                    return df
+            except Exception:
+                continue
+        return pd.read_csv(path, sep=None, engine="python", dtype=str)
+    if ext == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_json(path, dtype=str)
+
+
+def _pick_col(cols: set[str], candidates: list[str]) -> str | None:
+    for c in candidates:
+        if c in cols:
+            return c
+    return None
+
+
+def _load_ibge_lookup() -> dict[tuple[str, str], int]:
+    if not RAW_IBGE_FILE.exists():
+        return {}
+    with RAW_IBGE_FILE.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    items = payload if isinstance(payload, list) else payload.get("dados", [])
+    lookup: dict[tuple[str, str], int] = {}
+    for item in items:
+        if not isinstance(item, dict):
             continue
-    return "latin1"
+        cod = item.get("id") or item.get("codigo_ibge")
+        nome_mun = item.get("nome") or item.get("nome_municipio")
+        micro = item.get("microrregiao") or {}
+        meso = micro.get("mesorregiao") or {}
+        uf_obj = meso.get("UF") or item.get("UF") or {}
+        uf = uf_obj.get("sigla") if isinstance(uf_obj, dict) else item.get("sigla_uf")
+        if cod is not None and nome_mun and uf:
+            try:
+                lookup[(_norm_str(uf), _norm_str(nome_mun))] = int(cod)
+            except (TypeError, ValueError):
+                continue
+    return lookup
 
 
-def _read_single_anp_csv(spark: SparkSession, csv_path: Path, ingest_ts: datetime) -> DataFrame:
-    enc = _detect_encoding(csv_path)
-    df = (
-        spark.read.option("header", "true")
-        .option("sep", ";")
-        .option("encoding", enc)
-        .csv(str(csv_path))
+def _normalize_precos_chunk(
+    raw_df: pd.DataFrame, ingest_ts: datetime, ibge_lookup: dict[tuple[str, str], int]
+) -> pd.DataFrame:
+    df = raw_df.copy()
+    df.columns = [
+        str(c).strip().lower().replace(" ", "_").replace("-", "_")
+        for c in df.columns
+    ]
+    cols = set(df.columns)
+
+    uf_col = _pick_col(cols, ["estado___sigla", "estado__sigla", "estado_sigla", "uf", "sigla_uf", "estado"])
+    data_col = _pick_col(cols, ["data_da_coleta", "data_coleta", "dt_coleta", "data"])
+    prod_col = _pick_col(cols, ["produto", "combustivel", "tipo_combustivel"])
+    band_col = _pick_col(cols, ["bandeira", "nome_bandeira", "bandeira_posto"])
+    cnpj_col = _pick_col(cols, ["cnpj_da_revenda", "cnpj_revenda", "cnpj", "revenda_cnpj"])
+    mun_col = _pick_col(cols, ["municipio", "nome_municipio", "cidade"])
+    ibge_col = _pick_col(
+        cols,
+        ["codigo_ibge_municipio", "codigo_ibge", "cod_ibge", "id_municipio", "municipio_ibge"],
+    )
+    venda_col = _pick_col(
+        cols,
+        ["valor_de_venda", "valor_venda", "preco_venda", "vl_venda", "preco_revenda"],
+    )
+    compra_col = _pick_col(
+        cols,
+        ["valor_de_compra", "valor_compra", "preco_compra", "vl_compra"],
     )
 
-    norm_map = {_norm_col_name(c): f"`{c}`" for c in df.columns}
+    if not uf_col or not data_col or not prod_col or not venda_col:
+        raise ValueError(
+            f"Colunas obrigatorias ausentes nos precos ANP. Disponiveis: {sorted(cols)}"
+        )
 
-    def pick_expr(target_key: str) -> F.Column:
-        for alias in COLUMN_ALIASES[target_key]:
-            norm_alias = _norm_col_name(alias)
-            if norm_alias in norm_map:
-                return F.col(norm_map[norm_alias])
-        return F.lit(None).cast(StringType())
+    raw_dt = df[data_col].astype(str).str.strip()
+    dt = pd.to_datetime(raw_dt, format="%d/%m/%Y", errors="coerce")
+    mask_iso = dt.isna()
+    if mask_iso.any():
+        dt.loc[mask_iso] = pd.to_datetime(raw_dt.loc[mask_iso], errors="coerce")
 
-    return (
-        df.select(
-            F.upper(F.trim(pick_expr("uf"))).alias("uf"),
-            F.upper(F.trim(pick_expr("municipio_anp"))).alias("municipio_anp"),
-            F.trim(pick_expr("bairro")).alias("bairro"),
-            F.regexp_replace(F.trim(pick_expr("cep")), r"[^0-9]", "").alias("cep"),
-            F.trim(pick_expr("revenda")).alias("revenda"),
-            F.regexp_replace(F.trim(pick_expr("cnpj_revenda")), r"[^0-9]", "").alias("cnpj_revenda"),
-            F.upper(F.trim(pick_expr("bandeira"))).alias("bandeira"),
-            F.upper(F.trim(pick_expr("produto"))).alias("produto_raw"),
-            F.to_date(F.trim(pick_expr("data_coleta")), "dd/MM/yyyy").alias("data_coleta"),
-            F.regexp_replace(F.trim(pick_expr("valor_venda")), ",", ".")
-            .cast(DecimalType(10, 4))
-            .alias("valor_venda"),
-            F.regexp_replace(F.trim(pick_expr("valor_compra")), ",", ".")
-            .cast(DecimalType(10, 4))
-            .alias("valor_compra"),
-            F.trim(pick_expr("unidade_medida")).alias("unidade_medida"),
+    def _to_float(series: pd.Series) -> pd.Series:
+        cleaned = (
+            series.astype(str)
+            .str.strip()
+            .str.replace("R$", "", regex=False)
+            .str.replace(" ", "", regex=False)
+            .str.replace(",", ".", regex=False)
         )
-        .withColumn(
-            "produto",
-            F.when(F.col("produto_raw").contains("GASOLINA"), F.lit("GASOLINA COMUM"))
-            .when(F.col("produto_raw").contains("ETANOL"), F.lit("ETANOL"))
-            .otherwise(F.col("produto_raw")),
+        return pd.to_numeric(cleaned, errors="coerce")
+
+    valor_venda = _to_float(df[venda_col])
+    valor_compra = _to_float(df[compra_col]) if compra_col else pd.Series(pd.NA, index=df.index)
+
+    uf_clean = df[uf_col].astype(str).str.strip().str.upper()
+
+    if ibge_col:
+        cod_ibge = pd.to_numeric(df[ibge_col], errors="coerce").astype("Int64")
+    elif mun_col and ibge_lookup:
+        cod_ibge = pd.Series(
+            [
+                ibge_lookup.get((_norm_str(u), _norm_str(m)), pd.NA)
+                for u, m in zip(uf_clean, df[mun_col])
+            ],
+            index=df.index,
+            dtype="Int64",
         )
-        .filter(F.col("produto").isin(PRODUTOS_ALVO))
-        .withColumn("ano_mes", F.date_format(F.col("data_coleta"), "yyyy-MM"))
-        .filter(
-            F.col("data_coleta").isNotNull()
-            & F.col("valor_venda").isNotNull()
-            & (F.col("valor_venda") > F.lit(0))
-            & F.col("uf").isNotNull()
-            & (F.length(F.col("uf")) == 2)
-            & F.col("cnpj_revenda").isNotNull()
-            & (F.length(F.col("cnpj_revenda")) > 0)
-            & (F.col("ano_mes") >= F.lit(PERIODO_INICIO))
-            & (F.col("ano_mes") <= F.lit(PERIODO_FIM))
-        )
-        .withColumn("arquivo_origem", F.lit(csv_path.name).cast(StringType()))
-        .withColumn("data_ingestao_utc", F.lit(ingest_ts).cast(TimestampType()))
+    else:
+        cod_ibge = pd.Series(pd.NA, index=df.index, dtype="Int64")
+
+    out = pd.DataFrame(
+        {
+            "ano_mes": dt.dt.strftime("%Y-%m"),
+            "uf": uf_clean,
+            "data_coleta": dt.dt.strftime("%Y-%m-%d"),
+            "produto": df[prod_col].astype(str).str.strip().str.upper(),
+            "bandeira": (
+                df[band_col].astype(str).str.strip().str.upper()
+                if band_col
+                else pd.Series("NAO INFORMADA", index=df.index)
+            ),
+            "cnpj_revenda": (
+                df[cnpj_col].astype(str).str.strip()
+                if cnpj_col
+                else pd.Series(pd.NA, index=df.index)
+            ),
+            "codigo_ibge_municipio": cod_ibge,
+            "valor_venda": valor_venda,
+            "valor_compra": valor_compra,
+        }
     )
 
+    out = out[
+        out["ano_mes"].notna()
+        & (out["uf"].str.len() == 2)
+        & out["produto"].notna()
+        & (out["produto"] != "")
+        & out["valor_venda"].notna()
+        & (out["valor_venda"] > 0)
+    ].copy()
 
-def _load_ibge_lookup_df() -> pd.DataFrame | None:
-    if not INPUT_IBGE_SILVER_DIR.exists():
-        return None
-
-    ibge_parts = []
-    for uf_dir in sorted(INPUT_IBGE_SILVER_DIR.glob("uf=*")):
-        uf_code = uf_dir.name.split("=", 1)[1].strip().upper()
-        for pq_file in uf_dir.glob("*.parquet"):
-            part_pdf = pd.read_parquet(pq_file)
-            part_pdf["sigla_uf"] = uf_code
-            ibge_parts.append(part_pdf)
-
-    if not ibge_parts:
-        return None
-
-    ibge_pdf = pd.concat(ibge_parts, ignore_index=True)[
-        ["sigla_uf", "nome_municipio", "codigo_ibge"]
-    ].dropna(subset=["sigla_uf", "nome_municipio", "codigo_ibge"])
-
-    ibge_pdf["_uf_ibge"] = ibge_pdf["sigla_uf"].astype(str).str.strip().str.upper()
-    ibge_pdf["_mun_ibge"] = ibge_pdf["nome_municipio"].astype(str).str.strip().str.upper()
-    ibge_pdf["codigo_ibge_municipio"] = ibge_pdf["codigo_ibge"].astype("int32")
-
-    return (
-        ibge_pdf[["_uf_ibge", "_mun_ibge", "codigo_ibge_municipio"]]
-        .drop_duplicates(subset=["_uf_ibge", "_mun_ibge"])
-        .reset_index(drop=True)
-    )
+    out["data_ingestao_utc"] = ingest_ts
+    return out
 
 
-def _write_months_idempotent(pdf: pd.DataFrame, output_dir: Path) -> tuple[int, int]:
-    """
-    Grava as particoes `ano_mes=YYYY-MM` de forma idempotente no Windows.
-    Remove apenas as pastas de particao presentes no lote antes de gravar.
-    """
+def _write_idempotent_by_ano_mes(df: pd.DataFrame, output_dir: Path) -> tuple[int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    if pdf.empty:
-        return 0, 0
-
+    parts_written = 0
     total_rows = 0
-    partitions_written = 0
 
-    for ym_val, group_df in pdf.groupby("ano_mes", sort=True):
+    for ym_val, group_df in df.groupby("ano_mes", sort=True):
         ym_clean = str(ym_val).strip()
         part_path = output_dir / f"ano_mes={ym_clean}"
         if part_path.exists():
             shutil.rmtree(part_path)
-
         part_path.mkdir(parents=True, exist_ok=True)
-        data_df = group_df.drop(columns=["ano_mes"]).reset_index(drop=True)
-        data_df.to_parquet(part_path / "part-00000.parquet", index=False)
-        rows_in_part = len(data_df)
-        total_rows += rows_in_part
-        partitions_written += 1
-        print(f"  [PART {ym_clean}] linhas={rows_in_part}")
 
-    return partitions_written, total_rows
+        out_df = group_df.drop(columns=["ano_mes"]).reset_index(drop=True)
+        out_df.to_parquet(part_path / "part-00000.parquet", index=False)
+        parts_written += 1
+        total_rows += len(out_df)
+
+    return parts_written, total_rows
 
 
 def run_job() -> None:
-    csv_files = sorted(INPUT_ANP_DIR.glob("*.csv"))
-    if not csv_files:
-        raise FileNotFoundError(f"Nenhum CSV encontrado em: {INPUT_ANP_DIR}")
+    ingest_ts = datetime.now(timezone.utc)
+    files = _find_precos_files()
+    ibge_lookup = _load_ibge_lookup()
 
-    spark = _build_spark_session()
-    try:
-        ingest_ts = datetime.now(timezone.utc)
-        ibge_lookup = _load_ibge_lookup_df()
+    frames: list[pd.DataFrame] = []
+    for f in files:
+        raw_df = _read_single_file(f)
+        norm_df = _normalize_precos_chunk(raw_df, ingest_ts, ibge_lookup)
+        if not norm_df.empty:
+            frames.append(norm_df)
 
-        all_pdfs: list[pd.DataFrame] = []
+    if not frames:
+        raise ValueError("Nenhuma linha valida de precos ANP apos normalizacao.")
 
-        for csv_path in csv_files:
-            part_df = _read_single_anp_csv(spark, csv_path, ingest_ts)
-            part_pdf = part_df.toPandas()
-
-            if part_pdf.empty:
-                continue
-
-            if ibge_lookup is not None:
-                part_pdf["_uf_join"] = part_pdf["uf"].astype(str).str.strip().str.upper()
-                part_pdf["_mun_join"] = part_pdf["municipio_anp"].astype(str).str.strip().str.upper()
-                part_pdf = part_pdf.merge(
-                    ibge_lookup,
-                    left_on=["_uf_join", "_mun_join"],
-                    right_on=["_uf_ibge", "_mun_ibge"],
-                    how="left",
-                ).drop(columns=["_uf_join", "_mun_join", "_uf_ibge", "_mun_ibge"])
-            else:
-                part_pdf["codigo_ibge_municipio"] = pd.NA
-
-            all_pdfs.append(part_pdf)
-
-        if not all_pdfs:
-            raise RuntimeError("Nenhum registro valido encontrado apos filtragem dos CSVs da ANP.")
-
-        combined_pdf = pd.concat(all_pdfs, ignore_index=True)
-
-        # Ordena de forma deterministica e deduplica pelo grao (`cnpj_revenda`, `produto`, `data_coleta`)
-        combined_pdf = combined_pdf.sort_values(
-            by=["valor_venda", "arquivo_origem"],
-            ascending=[True, False],
-            na_position="last",
-        ).drop_duplicates(
-            subset=["cnpj_revenda", "produto", "data_coleta"],
-            keep="first",
-        )
-
-        expected_cols = [field.name for field in SILVER_SCHEMA.fields]
-        for col_name in expected_cols:
-            if col_name not in combined_pdf.columns:
-                raise ValueError(f"Coluna ausente em relacao ao DDL: {col_name}")
-
-        final_pdf = combined_pdf[expected_cols].copy()
-        final_pdf["codigo_ibge_municipio"] = pd.to_numeric(
-            final_pdf["codigo_ibge_municipio"], errors="coerce"
-        ).astype("Int32")
-        final_pdf["valor_venda"] = pd.to_numeric(final_pdf["valor_venda"], errors="coerce")
-        final_pdf["valor_compra"] = pd.to_numeric(final_pdf["valor_compra"], errors="coerce")
-        final_pdf["data_coleta"] = pd.to_datetime(final_pdf["data_coleta"], errors="coerce").dt.date
-        final_pdf["data_ingestao_utc"] = pd.to_datetime(final_pdf["data_ingestao_utc"], utc=True)
-
-        partitions_written, total_rows = _write_months_idempotent(final_pdf, OUTPUT_SILVER_DIR)
-
-        print(
-            f"[OK] silver_precos_combustiveis gravado em {OUTPUT_SILVER_DIR} | "
-            f"particoes={partitions_written} | linhas={total_rows}"
-        )
-    finally:
-        spark.stop()
+    full_df = pd.concat(frames, ignore_index=True)
+    parts_written, total_rows = _write_idempotent_by_ano_mes(full_df, SILVER_PRECOS_DIR)
+    print(f"  [SILVER PRECOS] particoes(ano_mes)={parts_written} | linhas={total_rows}")
+    print("[OK] Silver Precos concluido com sucesso (pandas + pyarrow).")
 
 
 if __name__ == "__main__":
