@@ -1,10 +1,10 @@
-"""
+﻿"""
 JOB: transform_silver_reembolso_uf_vigencia
 CAMADA: Prata (Silver)
 LE:
-  - data/bronze ou data/raw (tabela_reembolso_uf)
+- data/bronze (tabela_reembolso_uf), com fallback para data/raw apenas se Bronze nao existir
 GRAVA:
-  - data/silver/silver_reembolso_uf_vigencia (particionado por `uf`)
+- data/silver/silver_reembolso_uf_vigencia (particionado por `uf`)
 """
 
 from datetime import datetime, timezone
@@ -19,20 +19,30 @@ RAW_DIR = PROJECT_ROOT / "data" / "raw"
 SILVER_REEMBOLSO_DIR = PROJECT_ROOT / "data" / "silver" / "silver_reembolso_uf_vigencia"
 
 
+def _collect_reembolso_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    found: list[Path] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or p.suffix.lower() not in {".parquet", ".csv", ".json"}:
+            continue
+        if "reembolso" in p.name.lower() or "reembolso" in str(p.parent).lower():
+            found.append(p)
+    return found
+
+
 def _find_reembolso_files() -> list[Path]:
-    roots = [d for d in [BRONZE_DIR, RAW_DIR] if d.exists()]
-    candidates: list[Path] = []
-    for root in roots:
-        for p in sorted(root.rglob("*")):
-            if not p.is_file() or p.suffix.lower() not in {".parquet", ".csv", ".json"}:
-                continue
-            if "reembolso" in p.name.lower() or "reembolso" in str(p.parent).lower():
-                candidates.append(p)
-    if not candidates:
-        raise FileNotFoundError(
-            f"Nenhum arquivo de reembolso encontrado em {BRONZE_DIR} ou {RAW_DIR}."
-        )
-    return candidates
+    bronze_files = _collect_reembolso_files(BRONZE_DIR)
+    if bronze_files:
+        return bronze_files
+
+    raw_files = _collect_reembolso_files(RAW_DIR)
+    if raw_files:
+        return raw_files
+
+    raise FileNotFoundError(
+        f"Nenhum arquivo de reembolso encontrado em {BRONZE_DIR} ou {RAW_DIR}."
+    )
 
 
 def _load_reembolso_df(files: list[Path]) -> pd.DataFrame:
@@ -46,6 +56,17 @@ def _load_reembolso_df(files: list[Path]) -> pd.DataFrame:
             df = pd.read_json(path)
         frames.append(df)
     return pd.concat(frames, ignore_index=True)
+
+
+def _parse_br_date(series: pd.Series) -> pd.Series:
+    cleaned = series.astype(str).str.strip()
+    dt = pd.to_datetime(cleaned, format="%d/%m/%Y", errors="coerce")
+    missing_mask = dt.isna() & cleaned.str.match(r"^\d{4}-\d{2}-\d{2}$")
+    if missing_mask.any():
+        dt.loc[missing_mask] = pd.to_datetime(
+            cleaned.loc[missing_mask], format="%Y-%m-%d", errors="coerce"
+        )
+    return dt
 
 
 def _normalize_reembolso(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -83,13 +104,13 @@ def _normalize_reembolso(raw_df: pd.DataFrame) -> pd.DataFrame:
     )
     df["teto_litro_reembolso"] = pd.to_numeric(teto_str, errors="coerce")
 
-    ini_dt = pd.to_datetime(df[ini_col], errors="coerce")
+    ini_dt = _parse_br_date(df[ini_col])
     df["vigencia_inicio"] = ini_dt.dt.strftime("%Y-%m-%d")
 
     if fim_col:
         fim_raw = df[fim_col]
         fim_empty = fim_raw.isna() | fim_raw.astype(str).str.strip().str.lower().isin({"", "nan", "nat", "none", "null"})
-        fim_dt = pd.to_datetime(fim_raw, errors="coerce")
+        fim_dt = _parse_br_date(fim_raw)
         df["vigencia_fim_original_nula"] = (fim_empty | fim_dt.isna()).astype(bool)
         df["vigencia_fim"] = fim_dt.dt.strftime("%Y-%m-%d")
     else:
