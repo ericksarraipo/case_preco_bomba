@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
@@ -32,12 +32,14 @@ function Invoke-JobStep {
 Write-Host "Iniciando pipeline Distribuidora Veredas em: $ProjectRoot" -ForegroundColor Green
 
 # 1. Bronze (ingestao)
-if (Test-Path (Join-Path $ProjectRoot "src\jobs\ingest_bronze.py")) {
-    Invoke-JobStep -StepName "BRONZE" -ModuleName "src.jobs.ingest_bronze" -ExpectedFile "src\jobs\ingest_bronze.py"
-} elseif (Test-Path (Join-Path $ProjectRoot "src\jobs\run_bronze.py")) {
-    Invoke-JobStep -StepName "BRONZE" -ModuleName "src.jobs.run_bronze" -ExpectedFile "src\jobs\run_bronze.py"
-} else {
-    Write-Host "[AVISO] Script de ingestao Bronze nao encontrado em src\jobs\; assumindo dados Bronze/Prata ja presentes." -ForegroundColor Yellow
+$BronzeJobs = @(
+    @{ Name = "BRONZE IBGE/BCB";   Module = "src.jobs.fetch_bronze_ibge_bcb";      File = "src\jobs\fetch_bronze_ibge_bcb.py" },
+    @{ Name = "BRONZE ANP";        Module = "src.jobs.fetch_bronze_anp";           File = "src\jobs\fetch_bronze_anp.py" },
+    @{ Name = "BRONZE REEMBOLSO";  Module = "src.jobs.ingest_bronze_reembolso_uf"; File = "src\jobs\ingest_bronze_reembolso_uf.py" }
+)
+
+foreach ($job in $BronzeJobs) {
+    Invoke-JobStep -StepName $job.Name -ModuleName $job.Module -ExpectedFile $job.File
 }
 
 # 2. Prata (transformacoes)
