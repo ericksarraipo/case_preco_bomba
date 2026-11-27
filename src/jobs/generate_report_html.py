@@ -53,15 +53,40 @@ def _compute_metrics() -> dict[str, str]:
         total_coletas = len(silver_df)
 
     meses_cobertos = 0
-    for df_cand in [resumo_df, detalhe_df, silver_df]:
-        if not df_cand.empty:
-            for col in ["ano_mes", "mes_ano", "referencia_mes"]:
-                if col in df_cand.columns:
-                    meses_cobertos = int(df_cand[col].dropna().nunique())
-                    break
-        if meses_cobertos > 0:
-            break
+    periodos_encontrados = set()
 
+    for base_dir in [Path("data/gold"), Path("data/silver")]:
+        if base_dir.exists():
+            for part in base_dir.rglob("*=*"):
+                if part.is_dir() and "=" in part.name:
+                    k, v = part.name.split("=", 1)
+                    if "mes" in k.lower() or "periodo" in k.lower() or "competencia" in k.lower():
+                        val_clean = v.strip()
+                        if len(val_clean) >= 7 and val_clean[:4].isdigit() and val_clean[4:5] == "-":
+                            periodos_encontrados.add(val_clean[:7])
+
+    if len(periodos_encontrados) > 1:
+        meses_cobertos = len(periodos_encontrados)
+    else:
+        for df_cand in [resumo_df, detalhe_df, silver_df]:
+            if df_cand is not None and not df_cand.empty:
+                for col in ["ano_mes", "mes_ano", "referencia_mes", "competencia", "periodo"]:
+                    if col in df_cand.columns:
+                        n = int(df_cand[col].dropna().astype(str).str[:7].nunique())
+                        if n > meses_cobertos:
+                            meses_cobertos = n
+                        break
+                if meses_cobertos <= 1:
+                    for col in df_cand.columns:
+                        if "data" in col.lower() or "mes" in col.lower():
+                            s = pd.to_datetime(df_cand[col], errors="coerce").dropna()
+                            if not s.empty:
+                                n = int(s.dt.to_period("M").nunique())
+                                if n > meses_cobertos:
+                                    meses_cobertos = n
+                                break
+        if meses_cobertos == 0 and periodos_encontrados:
+            meses_cobertos = len(periodos_encontrados)
     cobertura_ibge = 0.0
     if not resumo_df.empty:
         for col in ["cobertura_ibge_pct", "pct_cobertura_ibge", "cobertura_ibge"]:
